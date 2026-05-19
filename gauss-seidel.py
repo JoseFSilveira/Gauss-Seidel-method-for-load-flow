@@ -29,10 +29,17 @@ class PowerSystem:
         self.Zlines = {}  # Dicionário para armazenar as impedancias das linhas entre as barras
         for i in range(self.num_buses):
             for j in range(i+1, self.num_buses):
-                self.Zlines[(i, j)] = 0.0 + 0.0j  # Impedancia da linha entre as barras i e j.
+                self.Zlines[(i, j)] = np.inf # Inicializar as impedancias das linhas com um valor infinito para indicar que as linhas ainda não foram definidas
 
     def add_Zline(self, bus1: int, bus2: int, Z: complex) -> None:
         
+        if bus1 == bus2:
+            raise ValueError("Não é possível adicionar uma linha entre a mesma barra. Verifique os índices das barras informados.")
+        elif bus1 < 0 or bus1 >= self.num_buses or bus2 < 0 or bus2 >= self.num_buses:
+            raise ValueError("Índices de barras inválidos. Verifique os índices das barras informados.")
+        elif bus2 < bus1: # Garantir que bus1 sempre seja menor que bus2 para manter a consistencia do dicionario de impedancias das linhas
+            bus1, bus2 = bus2, bus1
+
         bus_index = (bus1, bus2)
         mirrowed_bus_index = (bus2, bus1)
 
@@ -65,6 +72,9 @@ class PowerSystem:
 
     def calculate_Ybus(self, verbose=False) -> None:
 
+        # Zerar a matriz Ybus antes de calcular os valores, para evitar que valores antigos sejam mantidos caso a função seja chamada mais de uma vez
+        self.Ybus = np.zeros((self.num_buses, self.num_buses), dtype=complex)
+        
         # Verificar se as impedancias das linhas foram definidas corretamente
         for Zvalue in self.Zlines.values():
             if Zvalue == 0.0 + 0.0j:
@@ -95,7 +105,7 @@ class GaussSeidel:
         return new_V / Ybus[bus, bus]  # Dividir pela admitancia da barra para obter a nova tensao
 
 
-    def iterate(self, tolerance: float=10e-4, max_iterations: int=100, verbose: bool=False, coordinate_system: str='polar') -> None:
+    def iterate(self, tolerance: float=1e-4, max_iterations: int=100, verbose: bool=False, coordinate_system: str='polar') -> None:
         '''
         Realiza as iteracoes do metodo de Gauss-Seidel para o sistema de potencia fornecido, atualizando as tensoes das barras a cada iteracao.
         Verbose habillita a impressao dos resultados de cada iteracao.
@@ -124,45 +134,53 @@ class GaussSeidel:
                 elif self.sys.bus_types[bus] == 'PV':
                     Q_calc = -np.imag( np.conj(self.V_iter[bus]) * np.sum(self.sys.Ybus[bus, :] * self.V_iter) )  # Calcular a potencia reativa injetada na barra
                     S_espec = self.sys.Pespec[bus] + 1j*Q_calc  # Potencia especificada na barra, usando a potencia ativa especificada e a potencia reativa calculada
-                    self.V_iter[bus] = self.calc_new_V(bus, self.V_iter, self.sys.Ybus, S_espec)
+                    V_calc = self.calc_new_V(bus, self.V_iter, self.sys.Ybus, S_espec)
+                    _, Vangle_calc = R2P(V_calc)
+                    self.V_iter[bus] = P2R(self.sys.V0[bus].real, Vangle_calc)  # Manter a magnitude da tensao especificada e atualizar o angulo calculado
                 else:
                     raise ValueError(f"Tipo de barra inválido: {self.sys.bus_types[bus]}. Tipos válidos são: ['PQ', 'PV', 'Slack']")
                 
                 # Escrever o valor da tensao calculada para a barra
                 if verbose:
                     if coordinate_system == 'rectangular':
-                        print(f"Barra {bus} (Tipo: {self.sys.bus_types[bus]}): Tensão calculada = {self.V_iter[bus].real} + j{self.V_iter[bus].imag} p.u.")
+                        print(f"Barra {bus} ({self.sys.bus_types[bus]}): Tensão calculada = {self.V_iter[bus]} p.u.")
                     elif coordinate_system == 'polar':
                         Vabs, Vangle = R2P(self.V_iter[bus])
-                        print(f"Barra {bus} (Tipo: {self.sys.bus_types[bus]}): Tensão calculada = {Vabs} | {Vangle}° p.u.")
+                        print(f"Barra {bus} ({self.sys.bus_types[bus]}): Tensão calculada = {Vabs} | {Vangle}° p.u.")
 
             # Verificar a convergencia comparando as tensoes atuais com as tensoes anteriores
             max_diff = np.max(np.abs(self.V_iter - V_old))
-            if max_diff <= tolerance:
+            if max_diff < tolerance:
                 print(f"Convergencia atingida após {iteration+1} iterações.")
                 convergence_flag = True
             iteration += 1 # aumentar o contador de iteracoes
+            if iteration >= max_iterations and not convergence_flag:
+                print(f"Limite máximo de iterações atingido sem convergência. Diferença máxima: {max_diff}")
             print()  # Linha em branco para separar as iteracoes
 
 
 if __name__ == "__main__":
 
-    pwsys = PowerSystem(['Slack', 'PQ', 'PV']) # onde o index das barras eh correspondente a sua posicao na lista, ou seja, barra 0 = PQ, barra 1 = PV e barra 2 = Slack
+    # Criar o sistema de potencia
+    pwsys = PowerSystem(['Slack', 'PV', 'PQ', 'PQ']) # onde o index das barras eh correspondente a sua posicao na lista, ou seja, barra 0 = PQ, barra 1 = PV e barra 2 = Slack
 
     # Adicionando as impedancias das linhas entre as barras
-    pwsys.add_Zline(0, 1, 0.02 + 0.04j)
-    pwsys.add_Zline(0, 2, 0.01 + 0.03j)
-    pwsys.add_Zline(1, 2, 0.0125 + 0.025j)
+    pwsys.add_Zline(0, 1, 0.15 + 0.4j)
+    pwsys.add_Zline(0, 2, 0.1 + 0.3j)
+    pwsys.add_Zline(0, 3, 0.15 + 0.6j)
+    pwsys.add_Zline(1, 2, 0.07 + 0.25j)
+    pwsys.add_Zline(2, 3, 0.09 + 0.3j)
 
     # Calcular a matriz Ybus
     print() # Adicionar espaco para melhor visualizacao dos resultados
     pwsys.calculate_Ybus(verbose=True)
 
     # Adicionar os parametros das barras (tensao, potencia ativa e potencia reativa)
-    pwsys.add_bus_params(0, 1.05, 0.0)
-    pwsys.add_bus_params(1, 1.0, 0.0, P=-4.0, Q=-2.5)
-    pwsys.add_bus_params(2, 1.04, 0.0, P=2.0)
+    pwsys.add_bus_params(0, 1.06, 0.0)
+    pwsys.add_bus_params(1, 1.02, 0.0, P=1.2)
+    pwsys.add_bus_params(2, 1.0, 0.0, P=-0.7, Q=-0.5)
+    pwsys.add_bus_params(3, 1.0, 0.0, P=-0.6, Q=-0.3)
 
     # Calcular as tensoes das barras usando o metodo de Gauss-Seidel
     gs = GaussSeidel(pwsys)
-    gs.iterate(tolerance=10e-4, max_iterations=7, verbose=True, coordinate_system='rectangular')
+    gs.iterate(tolerance=1e-4, max_iterations=100, verbose=True, coordinate_system='rectangular')
