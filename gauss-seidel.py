@@ -26,12 +26,14 @@ class PowerSystem:
         self.Qespec = np.zeros(self.num_buses, dtype=np.float64)  # Potencia reativa especificada nas barras em pu
         self.delta = np.zeros(self.num_buses)  # Angulo das tensoes iniciais (0 degrees)
 
-        self.Zlines = {}  # Dicionário para armazenar as impedancias das linhas entre as barras
+        self.Zlines = {}  # Dicionario para armazenar as impedancias das linhas entre as barras em p.u.
+        self.B2_lines = {} # Dicionario para armazenar as susceptancias das linhas entre as barras em p.u.
         for i in range(self.num_buses):
             for j in range(i+1, self.num_buses):
-                self.Zlines[(i, j)] = np.inf # Inicializar as impedancias das linhas com um valor infinito para indicar que as linhas ainda não foram definidas
+                self.Zlines[(i, j)] = np.inf # Inicializar as impedancias das linhas com um valor infinito para indicar que as linhas ainda nao foram definidas
+                self.B2_lines[(i, j)] = 0 # Inicializar as susceptancias das linhas com zero para indicar que as linhas ainda nao foram definidas
 
-    def add_Zline(self, bus1: int, bus2: int, Z: complex) -> None:
+    def add_Zline(self, bus1: int, bus2: int, Z: complex, B2: float=0) -> None:
         
         if bus1 == bus2:
             raise ValueError("Não é possível adicionar uma linha entre a mesma barra. Verifique os índices das barras informados.")
@@ -45,6 +47,7 @@ class PowerSystem:
 
         if bus_index in self.Zlines or mirrowed_bus_index in self.Zlines:
             self.Zlines[bus_index] = Z
+            self.B2_lines[bus_index] = B2
         else:
             raise ValueError(f"Não existe linha entre as barras {bus1} e {bus2}.")
         
@@ -88,6 +91,7 @@ class PowerSystem:
                     self.Ybus[bus2, bus1] = -ybus  # Elemento simetrico fora da diagonal
         for bus in range(self.num_buses):
             self.Ybus[bus, bus] = -np.sum(self.Ybus[bus, :])  # Elemento diagonal eh a soma dos elementos fora da diagonal, mas positivo
+            self.Ybus[bus, bus] += np.sum([1j*B2 for (b1, b2), B2 in self.B2_lines.items() if bus in (b1, b2)])  # Adicionar as susceptancias shunt das linhas conectadas a barra
         
         if verbose:
             print(f"Matriz Ybus calculada:\n{self.Ybus}\n")
@@ -136,7 +140,7 @@ class GaussSeidel:
                     S_espec = self.sys.Pespec[bus] + 1j*Q_calc  # Potencia especificada na barra, usando a potencia ativa especificada e a potencia reativa calculada
                     V_calc = self.calc_new_V(bus, self.V_iter, self.sys.Ybus, S_espec)
                     _, Vangle_calc = R2P(V_calc)
-                    self.V_iter[bus] = P2R(self.sys.V0[bus].real, Vangle_calc)  # Manter a magnitude da tensao especificada e atualizar o angulo calculado
+                    self.V_iter[bus] = P2R(np.abs(self.sys.V0[bus]), Vangle_calc)  # Manter a magnitude da tensao especificada e atualizar o angulo calculado
                 else:
                     raise ValueError(f"Tipo de barra inválido: {self.sys.bus_types[bus]}. Tipos válidos são: ['PQ', 'PV', 'Slack']")
                 
@@ -165,11 +169,11 @@ if __name__ == "__main__":
     pwsys = PowerSystem(['Slack', 'PV', 'PQ', 'PQ']) # onde o index das barras eh correspondente a sua posicao na lista, ou seja, barra 0 = PQ, barra 1 = PV e barra 2 = Slack
 
     # Adicionando as impedancias das linhas entre as barras
-    pwsys.add_Zline(0, 1, 0.15 + 0.4j)
-    pwsys.add_Zline(0, 2, 0.1 + 0.3j)
-    pwsys.add_Zline(0, 3, 0.15 + 0.6j)
-    pwsys.add_Zline(1, 2, 0.07 + 0.25j)
-    pwsys.add_Zline(2, 3, 0.09 + 0.3j)
+    pwsys.add_Zline(0, 1, 0.15 + 0.4j, B2=0.04)
+    pwsys.add_Zline(0, 2, 0.1 + 0.3j, B2=0.05)
+    pwsys.add_Zline(0, 3, 0.15 + 0.6j, B2=0.04)
+    pwsys.add_Zline(1, 2, 0.07 + 0.25j, B2=0.03)
+    pwsys.add_Zline(2, 3, 0.09 + 0.3j, B2=0.04)
 
     # Calcular a matriz Ybus
     print() # Adicionar espaco para melhor visualizacao dos resultados
