@@ -220,8 +220,8 @@ class GaussSeidel:
 
 if __name__ == "__main__":
 
-    # Criar o sistema de potencia
-    pwsys = PowerSystem(['Slack', 'PV', 'PQ', 'PQ']) # onde o index das barras eh correspondente a sua posicao na lista, ou seja, barra 0 = PQ, barra 1 = PV e barra 2 = Slack
+    # Criar o sistema de potencia, onde o index das barras eh correspondente a sua posicao na lista
+    pwsys = PowerSystem(['Slack', 'PV', 'PQ', 'PQ']) # barra 0 = Slack, barra 1 = PV, barra 2 = PQ, barra 3 = PQ
 
     # Adicionando as impedancias das linhas entre as barras
     pwsys.add_Zline(0, 1, 0.15 + 0.4j, B2=0.04)
